@@ -47,7 +47,7 @@ void a_test(size_t thread_id)
   for (size_t i = 0; i < buf_cnt; i++)
       buffers[i] = memory + i * buf_size;
 
-  for (size_t i = 0; i < 2000000000; i++) {
+  for (size_t i = 0; i < 20000000; i++) {
     active_memcpy(buffers[rand() % buf_cnt], buffers[rand() % buf_cnt], buf_size);
   }
 }
