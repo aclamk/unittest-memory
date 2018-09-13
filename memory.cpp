@@ -26,11 +26,13 @@ void* mymemcpy(void* d1, const void* s1, size_t size) throw ()
 }
 
 char* base_mem;
-bool use_fork = false;
 
+bool use_fork = false;
 enum {use_memcpy, use_mymemcpy} memcpy_type = use_memcpy;
 auto active_memcpy = memcpy;
 enum {use_shm, use_mmap, use_malloc} alloc_type = use_malloc;
+bool wide = false;
+bool do_check = false;
 
 size_t thread_cnt;
 size_t buf_size;
@@ -42,13 +44,31 @@ void a_test(size_t thread_id)
   gettimeofday(&tv, nullptr);
   srand(tv.tv_usec);
   
-  char* memory = base_mem + buf_size * buf_cnt * thread_id;
+  char* memory = base_mem + (buf_size * buf_cnt + (wide?10*1024*1024:0)) * thread_id;
   char* buffers[buf_cnt];  
-  for (size_t i = 0; i < buf_cnt; i++)
+  for (size_t i = 0; i < buf_cnt; i++) {
       buffers[i] = memory + i * buf_size;
+      memset(buffers[i], rand(), buf_size);
+  }
 
-  for (size_t i = 0; i < 20000000; i++) {
-    active_memcpy(buffers[rand() % buf_cnt], buffers[rand() % buf_cnt], buf_size);
+  size_t change_count=0;
+  char* check_memory = base_mem + (buf_size * buf_cnt + (wide?10*1024*1024:0)) *
+	((thread_id + 1) % thread_cnt);
+  char last_val = *check_memory;
+  
+  for (size_t j = 0; j < 200000; j++) {
+    for (size_t i = 0; i < 100; i++) {
+      active_memcpy(buffers[rand() % buf_cnt], buffers[rand() % buf_cnt], buf_size);
+      memset(buffers[rand() % buf_cnt], rand(), buf_size);
+    }
+    if (do_check) {
+      if (last_val != *check_memory)
+	change_count++;
+      last_val = *check_memory;
+    }
+  }
+  if (do_check) {
+    std::cout << "thread_id=" << thread_id << " change_count=" << change_count << std::endl;
   }
 }
 
@@ -86,11 +106,11 @@ void thread_version()
 
 void the_test()
 {
-  
+  size_t data_size = thread_cnt * (buf_cnt * buf_size + (wide?10*1024*1024:0));
 
   switch (alloc_type) {
   case use_mmap:
-    base_mem = (char*)mmap(nullptr, thread_cnt * buf_cnt * buf_size, PROT_READ|PROT_WRITE|PROT_EXEC,
+    base_mem = (char*)mmap(nullptr, data_size, PROT_READ|PROT_WRITE|PROT_EXEC,
 			   MAP_SHARED|MAP_ANONYMOUS, -1, 0);
     std::cout << "using mmap" << std::endl;
     break;
@@ -98,15 +118,15 @@ void the_test()
     {
       int mem_fd = shm_open("name", O_RDWR|O_CREAT, 0666);
       assert(mem_fd >= 0);
-      int res = ftruncate(mem_fd, thread_cnt * buf_cnt * buf_size);
+      int res = ftruncate(mem_fd, data_size);
       assert(res == 0);
-      base_mem = (char*)mmap(nullptr, thread_cnt * buf_cnt * buf_size, PROT_READ|PROT_WRITE|PROT_EXEC,
+      base_mem = (char*)mmap(nullptr, data_size, PROT_READ|PROT_WRITE|PROT_EXEC,
 			     MAP_SHARED, mem_fd, 0);
       std::cout << "using shm" << std::endl;
     }
     break;
   case use_malloc:
-    base_mem = (char*) malloc (thread_cnt * buf_cnt * buf_size);
+    base_mem = (char*) malloc (data_size);
     std::cout << "using malloc" << std::endl;    
     break;
   default:
@@ -125,7 +145,7 @@ void the_test()
   default:
     assert(0);
   }
-  
+  std::cout << "wide: " << wide << std::endl;
   if (use_fork) {
     std::cout << "using fork" << std::endl;
     fork_version();
@@ -133,12 +153,33 @@ void the_test()
     std::cout << "using thread" << std::endl;
     thread_version();
   }
+
+  if (alloc_type == use_shm) {
+    shm_unlink("name");
+  }
 }
 
-
+void print_help() {
+  std::cout << "usage:" << std::endl;
+  std::cout << "  memory thread-count element-size element-count [modifiers]" << std::endl;
+  std::cout << std::endl;
+  std::cout << "modifiers:" << std::endl;
+  std::cout << "  thread - create worker threads [default]" << std::endl;
+  std::cout << "  fork   - create worker subprocesses" << std::endl;
+  std::cout << "  malloc [default] / shm / mmap" << std::endl;
+  std::cout << "         - select allocator " << std::endl;
+  std::cout << "  wide   - make 10MB space between test sets" << std::endl;
+  std::cout << "  check  - verify if other regions do change (sanity checkup)" << std::endl;
+  std::cout << "  memcpy - select glibc [default]" << std::endl;
+  std::cout << "  mymemcpy - internal hand-crafted memcpy" << std::endl;
+}
 
 int main(int argc, char **argv)
 {
+  if (argc < 4) {
+    print_help();
+    return(1);
+  }
   thread_cnt = atoi(argv[1]);
   buf_size = atoi(argv[2]);
   buf_cnt = atoi(argv[3]);
@@ -161,6 +202,12 @@ int main(int argc, char **argv)
     if (argv[0] == std::string("mmap")) {
       alloc_type = use_mmap;
     } else
+    if (argv[0] == std::string("wide")) {
+      wide = true;
+    } else
+    if (argv[0] == std::string("check")) {
+      do_check = true;
+    } else
     if (argv[0] == std::string("memcpy")) {
       memcpy_type = use_memcpy;
     } else
@@ -168,6 +215,7 @@ int main(int argc, char **argv)
       memcpy_type = use_mymemcpy;
     } else {
       std::cerr << "unrecognized '" << argv[0] << "'" << std::endl;
+      print_help();
       return 1;
     }
     argc--;
