@@ -106,13 +106,18 @@ void thread_version()
 
 void the_test()
 {
+  std::cout << "threads=" << thread_cnt << " size=" << buf_size << " elements=" << buf_cnt << "; ";
+
+  if (do_check)
+    std::cout << "*check* ";
+  
   size_t data_size = thread_cnt * (buf_cnt * buf_size + (wide?10*1024*1024:0));
 
   switch (alloc_type) {
   case use_mmap:
     base_mem = (char*)mmap(nullptr, data_size, PROT_READ|PROT_WRITE|PROT_EXEC,
 			   MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-    std::cout << "using mmap" << std::endl;
+    std::cout << "mmap ";
     break;
   case use_shm:
     {
@@ -122,12 +127,12 @@ void the_test()
       assert(res == 0);
       base_mem = (char*)mmap(nullptr, data_size, PROT_READ|PROT_WRITE|PROT_EXEC,
 			     MAP_SHARED, mem_fd, 0);
-      std::cout << "using shm" << std::endl;
+      std::cout << "shm ";
     }
     break;
   case use_malloc:
     base_mem = (char*) malloc (data_size);
-    std::cout << "using malloc" << std::endl;    
+    std::cout << "malloc ";
     break;
   default:
     assert(0);
@@ -136,21 +141,21 @@ void the_test()
   switch (memcpy_type) {
   case use_memcpy:
     active_memcpy = memcpy;
-    std::cout << "using original memcpy" << std::endl;    
+    std::cout << "memcpy ";    
     break;
   case use_mymemcpy:
     active_memcpy = mymemcpy;
-    std::cout << "using local memcpy" << std::endl;    
+    std::cout << "my-memcpy";    
     break;
   default:
     assert(0);
   }
-  std::cout << "wide: " << wide << std::endl;
+  std::cout << "wide=" << wide << " ";
   if (use_fork) {
-    std::cout << "using fork" << std::endl;
+    std::cout << "fork " << std::endl;
     fork_version();
   } else {
-    std::cout << "using thread" << std::endl;
+    std::cout << "thread " << std::endl;
     thread_version();
   }
 
@@ -221,7 +226,6 @@ int main(int argc, char **argv)
     argc--;
     argv++;
   }
-  std::cout << "thread_cnt=" << thread_cnt << " buf_size=" << buf_size << " buf_cnt=" << buf_cnt << std::endl;
   the_test();
   
   return 0;
